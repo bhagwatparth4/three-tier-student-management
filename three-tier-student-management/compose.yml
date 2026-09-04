@@ -1,0 +1,72 @@
+services:
+  frontend:
+    build:
+      context: ./frontend
+      target: production
+    container_name: student-frontend
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - frontend_net
+      - backend_net
+
+  backend:
+    build:
+      context: ./backend
+      target: production
+    container_name: student-backend
+    restart: unless-stopped
+    expose:
+      - "8080"
+    environment:
+      NODE_ENV: production
+      PORT: 8080
+      MONGO_URI: mongodb://mongo:27017/student_db
+      # Used to sign login/session tokens. Override this in production
+      # (e.g. via an .env file or `docker compose --env-file`) rather than
+      # committing a real secret to source control.
+      JWT_SECRET: ${JWT_SECRET:-dev-secret-change-me}
+    depends_on:
+      mongo:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:8080/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - backend_net
+
+  mongo:
+    image: mongo:8
+    container_name: student-mongo
+    restart: unless-stopped
+    # Fix for MongoDB SERVER-121912: MongoDB 8.x's bundled TCMalloc crashes on
+    # startup under Linux kernel 6.19+ (common on newer EC2 AMIs). Setting this
+    # glibc rseq tunable works around the incompatibility without needing to
+    # downgrade the host kernel or the MongoDB image. Remove once MongoDB ships
+    # a patched TCMalloc build (tracked in the linked Jira ticket).
+    environment:
+      MONGO_INITDB_DATABASE: student_db
+      GLIBC_TUNABLES: glibc.pthread.rseq=1
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - backend_net
+
+volumes:
+  mongo_data:
+
+networks:
+  frontend_net:
+  backend_net:
